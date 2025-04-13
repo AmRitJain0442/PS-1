@@ -1,2 +1,4 @@
 # PS-1
-Database
+Install requirements 
+run app
+
