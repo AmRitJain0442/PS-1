@@ -423,58 +423,142 @@ def main():
         # Project Mode Analysis with interactive charts
         st.subheader("🎯 Project Mode Analysis")
         df = load_data("""
-            SELECT p.*, pb.business_domain
+            SELECT 
+                p.*,
+                pb.business_domain,
+                s.name as station_name
             FROM projects p
             JOIN problem_banks pb ON p.problem_bank_id = pb.problem_bank_id
+            JOIN stations s ON p.station_id = s.station_id
         """)
         
         # Replace NULL values with 'Not Specified'
         df['mode'] = df['mode'].fillna('Not Specified')
         
-        # Mode distribution with interactive chart
-        mode_counts = df['mode'].value_counts()
-        fig = px.pie(values=mode_counts.values, names=mode_counts.index,
-                    title="Project Mode Distribution",
-                    hole=0.4)
-        fig.update_traces(textposition='inside', textinfo='percent+label')
+        # Add sorting options
+        st.sidebar.subheader("Sort Options")
+        sort_by = st.sidebar.radio(
+            "Sort Stations By:",
+            ["Name", "Most Online Projects", "Most Onsite Projects", "Most Hybrid Projects"],
+            key="sort_option"
+        )
+        
+        # Prepare station-wise mode counts
+        station_mode_counts = pd.pivot_table(
+            df,
+            values='project_id',
+            index='station_name',
+            columns='mode',
+            aggfunc='count',
+            fill_value=0
+        ).reset_index()
+        
+        # Sort based on selection
+        if sort_by == "Name":
+            station_mode_counts = station_mode_counts.sort_values('station_name')
+        elif sort_by == "Most Online Projects":
+            station_mode_counts = station_mode_counts.sort_values('Online', ascending=False)
+        elif sort_by == "Most Onsite Projects":
+            station_mode_counts = station_mode_counts.sort_values('Onsite', ascending=False)
+        elif sort_by == "Most Hybrid Projects":
+            station_mode_counts = station_mode_counts.sort_values('Hybrid', ascending=False)
+        
+        # Display the sorted summary
+        st.subheader("📊 Station Project Modes (Sorted)")
+        st.dataframe(station_mode_counts, use_container_width=True)
+        
+        # Create sorted bar chart
+        station_modes = df.groupby(['station_name', 'mode']).size().reset_index(name='count')
+        station_order = station_mode_counts['station_name'].tolist()
+        
+        fig = px.bar(station_modes, 
+                    x='station_name', 
+                    y='count',
+                    color='mode',
+                    title=f"Project Modes by Station (Sorted by {sort_by})",
+                    labels={
+                        'station_name': 'Station Name',
+                        'count': 'Number of Projects',
+                        'mode': 'Project Mode'
+                    },
+                    category_orders={"station_name": station_order})
+        
+        fig.update_layout(
+            xaxis_tickangle=-45,
+            height=600,
+            showlegend=True,
+            xaxis_title="Station Name",
+            yaxis_title="Number of Projects"
+        )
         st.plotly_chart(fig, use_container_width=True)
         
-        # Mode by Business Domain with interactive chart
-        mode_domain = df.groupby(['business_domain', 'mode']).size().reset_index(name='count')
-        fig = px.bar(mode_domain, x='business_domain', y='count', color='mode',
-                    title="Project Mode Distribution by Business Domain",
-                    barmode='group',
-                    labels={'business_domain': 'Business Domain', 'count': 'Number of Projects', 'mode': 'Mode'})
-        fig.update_traces(hovertemplate="<b>%{x}</b><br>Projects: %{y}<br>Mode: %{fullData.name}<extra></extra>")
-        st.plotly_chart(fig, use_container_width=True)
+        # Mode distribution pie chart
+        st.subheader("🔄 Overall Mode Distribution")
+        mode_counts = df['mode'].value_counts()
+        fig_pie = px.pie(
+            values=mode_counts.values, 
+            names=mode_counts.index,
+            title="Overall Project Mode Distribution",
+            hole=0.4
+        )
+        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig_pie, use_container_width=True)
         
         # Filter projects with advanced options
-        st.subheader("🔍 Filter Projects")
-        col1, col2 = st.columns(2)
+        st.subheader("🔍 Filter and Search Projects")
+        col1, col2, col3 = st.columns(3)
         
         with col1:
             all_modes = ['All'] + sorted(df['mode'].unique().tolist())
-            selected_mode = st.selectbox("Select Project Mode", all_modes)
+            selected_mode = st.selectbox("Select Project Mode", all_modes, key="mode_filter")
         
         with col2:
             all_domains = ['All'] + sorted(df['business_domain'].unique().tolist())
-            selected_domain = st.selectbox("Select Business Domain", all_domains)
+            selected_domain = st.selectbox("Select Business Domain", all_domains, key="domain_filter")
+            
+        with col3:
+            all_stations = ['All'] + station_order  # Use sorted station list
+            selected_station = st.selectbox("Select Station", all_stations, key="station_filter")
         
         filtered_df = df.copy()
         if selected_mode != "All":
             filtered_df = filtered_df[filtered_df['mode'] == selected_mode]
         if selected_domain != "All":
             filtered_df = filtered_df[filtered_df['business_domain'] == selected_domain]
+        if selected_station != "All":
+            filtered_df = filtered_df[filtered_df['station_name'] == selected_station]
         
         # Add search functionality to the dataframe
-        search_text = st.text_input("Search in Projects", placeholder="Search by title, description...")
+        search_text = st.text_input("Search in Projects", placeholder="Search by title, description...", key="project_search")
         if search_text:
             filtered_df = filtered_df[
                 filtered_df['title'].str.contains(search_text, case=False, na=False) |
                 filtered_df['description'].str.contains(search_text, case=False, na=False)
             ]
         
-        st.dataframe(filtered_df, use_container_width=True)
+        # Display the filtered projects with station names
+        if not filtered_df.empty:
+            display_cols = ['station_name', 'title', 'mode', 'business_domain', 'mentor_name']
+            st.dataframe(
+                filtered_df[display_cols].sort_values(['mode', 'station_name']), 
+                use_container_width=True
+            )
+            
+            # Show statistics for filtered results
+            st.subheader("📈 Filtered Results Statistics")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Projects", len(filtered_df))
+            with col2:
+                mode_stats = filtered_df['mode'].value_counts()
+                st.write("Mode Distribution:")
+                st.write(mode_stats)
+            with col3:
+                station_stats = filtered_df['station_name'].value_counts()
+                st.write("Top Stations:")
+                st.write(station_stats.head())
+        else:
+            st.info("No projects found matching the selected criteria.")
     
     elif page == "Skills Analysis":
         st.header("🎯 Skills Analysis")
