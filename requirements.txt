@@ -1,3 +1,8 @@
+<<<<<<< HEAD
 streamlit==1.31.0
 pandas==2.2.0
+=======
+streamlit==1.31.0
+pandas==2.2.0
+>>>>>>> bf2110df8bb1623be4b7b45140e00ae579b78634
 plotly==5.18.0 
